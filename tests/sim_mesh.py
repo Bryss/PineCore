@@ -178,6 +178,10 @@ async def main():
         bob = Node("Bob", os.path.join(root, "bob"), 15002, air)
         pinecore.setup_environment(alice.paths)
         test_aes_shim()
+        # The simulated radio bypasses the real driver, so import it explicitly
+        # (an unimportable namespace package once broke only real hardware).
+        check("SX1262/CH341 driver modules import from the unpacked wheels",
+              len(pinecore.import_radio_driver()) == 3)
 
         await alice.start()
         await bob.start()

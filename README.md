@@ -3,16 +3,20 @@
 > [!CAUTION]
 > **VIBE-CODED PROOF OF CONCEPT. NOT A WORKING, TESTED PRODUCT.**
 >
-> An AI assistant wrote this in one session. It has **never been run against the real Glytch Mesh
-> Mod radio**: the module wasn't attached, and no LoRa packet has ever been sent or received through
-> this code. The Mod and its antenna share the Pager's only USB port with the USB-C link used during
-> development, so it was never plugged in. What *was* tested: two simulated nodes on a fake radio
-> on a Mac, plus installing the Python runtime and self-test on one Pager with no Mod attached. That's it.
+> An AI assistant wrote this in one session. **It has never sent or received a single LoRa packet.**
 >
-> Expect it to be broken in ways nobody has found yet. Radio init, pin mapping, TX power, timing,
-> app compatibility: all unverified on hardware. Don't rely on it for anything, don't trust it for
-> emergency comms, and check that your radio settings are legal in your country before you transmit.
-> Use at your own risk; no support, no warranty.
+> What has actually been checked, on one Pager with the Glytch Mesh Mod attached:
+> - Python runtime installs (from files staged over USB; **the payload's own online download path has never run**)
+> - PineCore takes the CH341 from the Pager's kernel driver and talks SPI to the SX1262: register
+>   reads come back correct, the chip sits in RX mode, and the noise floor reads a live value (around -103 dBm)
+> - the MeshCore companion protocol answers on TCP 5000 (device info, settings, battery, stats),
+>   tested with the `meshcore` Python client. The MeshCore phone app was **not** tested.
+> - two simulated nodes on a fake radio exchange adverts, DMs, ACKs and channel messages
+>
+> Not verified at all: transmitting, receiving real packets, interop with real MeshCore nodes, TX
+> power and RF switching on this module, the phone app. Expect it to break in ways nobody has found
+> yet. Don't rely on it for anything, don't trust it for emergency comms, and check your radio
+> settings are legal where you are before you transmit. Use at your own risk; no support, no warranty.
 
 **MeshCore for the WiFi Pineapple Pager + Glytch Mesh Mod (proof of concept).**
 
@@ -45,7 +49,7 @@ overlay (no pycryptodome/libgmp needed).
 
 The Python runtime comes from the official OpenWrt 24.10 feed (`python3-light`, `-asyncio`,
 `-logging`, `-ctypes`, `-pynacl`, about 17 MB). openhop_core 1.1.3 and pyusb 1.3.1 are downloaded from
-PyPI, pinned by SHA-256, and imported directly from their wheels.
+PyPI, pinned by SHA-256, and unpacked into `/root/.pinecore/lib/site`.
 
 ## Install
 
@@ -87,6 +91,8 @@ applied to the radio live and persisted. Frequencies outside 850–930 MHz are r
 
 ## Notes
 
+- **Noise floor:** the first hardware test read about -103 dBm with the Pager on USB next to a laptop.
+  That's high and likely local interference, so expect reduced range until that's understood.
 - **TX power:** the default is 20 dBm. If your Mesh Mod uses a high-power E22-…M30S module, the
   external PA adds about 8 dB, so lower the setting to stay within your region's limit
   (EU 869.4–869.65 MHz: 500 mW ERP).

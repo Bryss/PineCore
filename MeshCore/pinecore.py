@@ -35,6 +35,7 @@ import os
 import signal
 import sys
 import time
+import shutil
 import types
 
 HOME = os.environ.get("PINECORE_HOME", "/root/.pinecore")
@@ -112,11 +113,46 @@ class Paths:
 # Runtime environment: vendored wheels, libusb lookup, AES fallback
 # ---------------------------------------------------------------------------
 
+def unpack_wheels(paths):
+    """Extract the pinned wheels into lib/site (only when they change).
+
+    Importing straight from the .whl does not work: openhop_core's
+    hardware/lora is an implicit namespace package, which zipimport cannot load.
+    """
+    wheels = sorted(glob.glob(os.path.join(paths.lib, "*.whl")))
+    site = os.path.join(paths.lib, "site")
+    stamp = "".join("%s %d\n" % (os.path.basename(w), os.path.getsize(w)) for w in wheels)
+    stamp_path = os.path.join(site, ".wheels")
+    try:
+        with open(stamp_path, "r") as f:
+            if f.read() == stamp:
+                return site
+    except OSError:
+        pass
+    # The payload unpacks with unzip and writes the same stamp; this path is a
+    # fallback for dev machines. (zipfile pulls in pathlib -> urllib, which the
+    # Pager's minimal Python does not ship.)
+    import zipfile
+
+    tmp = site + ".tmp"
+    shutil.rmtree(tmp, ignore_errors=True)
+    os.makedirs(tmp, mode=0o700)
+    for wheel in wheels:
+        with zipfile.ZipFile(wheel) as zf:
+            zf.extractall(tmp)
+    with open(os.path.join(tmp, ".wheels"), "w") as f:
+        f.write(stamp)
+    shutil.rmtree(site, ignore_errors=True)
+    os.rename(tmp, site)
+    return site
+
+
 def setup_environment(paths):
     """Make the pinned wheels importable and patch what OpenWrt lacks."""
-    for wheel in sorted(glob.glob(os.path.join(paths.lib, "*.whl")), reverse=True):
-        if wheel not in sys.path:
-            sys.path.insert(0, wheel)
+    if glob.glob(os.path.join(paths.lib, "*.whl")):
+        site = unpack_wheels(paths)
+        if site not in sys.path:
+            sys.path.insert(0, site)
 
     # OpenWrt has no ldconfig cache or compiler, so ctypes.util.find_library
     # returns None for libraries that are present. pyusb resolves libusb
@@ -346,6 +382,16 @@ def make_companion_class():
                 return False
             return super().set_radio_params(freq_hz, bw_hz, sf, cr)
 
+        def _get_radio_stats(self):
+            # The SX1262 driver samples RSSI while idle; report it so the app
+            # shows a real noise floor instead of 0.
+            stats = super()._get_radio_stats()
+            get_floor = getattr(self._radio, "get_noise_floor", None)
+            floor = get_floor() if callable(get_floor) else None
+            if floor is not None:
+                stats["noise_floor"] = int(round(floor))
+            return stats
+
         def import_private_key(self, key):
             # CompanionRadio swaps in a new MeshNode without restarting its
             # dispatcher, so persist the key and let procd restart us cleanly.
@@ -484,10 +530,16 @@ def _channel(name, secret):
 # Radio
 # ---------------------------------------------------------------------------
 
-def build_radio(prefs_data):
+def import_radio_driver():
     from openhop_core.hardware.lora.LoRaRF.SX126x import set_spi_transport
     from openhop_core.hardware.sx1262_wrapper import SX1262Radio
     from openhop_core.hardware.transports.ch341_spi_transport import CH341SPITransport
+
+    return set_spi_transport, SX1262Radio, CH341SPITransport
+
+
+def build_radio(prefs_data):
+    set_spi_transport, SX1262Radio, CH341SPITransport = import_radio_driver()
 
     check_frequency(prefs_data["frequency_hz"])
     spi = CH341SPITransport(vid=CH341_VID, pid=CH341_PID, auto_setup_gpio=True)
@@ -756,6 +808,7 @@ def cmd_selftest(paths, args):
     check("pynacl", lambda: __import__("nacl").__version__)
     check("aes", lambda: AES_BACKEND)
     check("companion", lambda: make_companion_class() and "")
+    check("radio driver", lambda: import_radio_driver() and "SX1262 over CH341")
 
     def usb():
         import usb.backend.libusb1
@@ -813,10 +866,17 @@ def main(argv=None):
 
     if args.cmd == "run":
         try:
-            return asyncio.run(run_daemon(paths, port=args.port, bind=args.bind))
+            code = asyncio.run(run_daemon(paths, port=args.port, bind=args.bind))
         except Exception as e:
             log.error("PineCore failed: %s", e, exc_info=getattr(args, "debug", False))
-            return 1
+            code = 1
+        # State is saved and the radio released by now. Skip interpreter
+        # teardown: pyusb's finalizers race libusb there and trip
+        # "Assertion failed: refcnt >= 2" (an abort) on every stop.
+        logging.shutdown()
+        sys.stdout.flush()
+        sys.stderr.flush()
+        os._exit(code)
     handlers = {
         "info": cmd_info,
         "presets": cmd_presets,

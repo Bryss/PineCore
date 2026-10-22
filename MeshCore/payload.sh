@@ -184,6 +184,26 @@ fetch_wheels() {
     for entry in "${WHEELS[@]}"; do [ "${f##*/}" = "${entry%%|*}" ] && keep=1; done
     [ "$keep" -eq 1 ] || rm -f "$f"
   done
+  unpack_wheels
+}
+
+# Python can't import openhop_core straight from its wheel (hardware/lora is a
+# namespace package, which zipimport can't load), so unpack into lib/site.
+# The stamp format matches unpack_wheels() in pinecore.py.
+unpack_wheels() {
+  local site="$HOME_DIR/lib/site" stamp='' f
+  for f in "$HOME_DIR"/lib/*.whl; do
+    [ -e "$f" ] || continue
+    stamp="$stamp${f##*/} $(wc -c < "$f" | tr -d ' ')
+"
+  done
+  [ "$(cat "$site/.wheels" 2>/dev/null; printf x)" = "${stamp}x" ] && return 0
+  rm -rf "$site.tmp" && mkdir -p "$site.tmp" || fail 'Cannot stage Python libraries'
+  for f in "$HOME_DIR"/lib/*.whl; do
+    unzip -q -o "$f" -d "$site.tmp" || fail "Cannot unpack ${f##*/}"
+  done
+  printf '%s' "$stamp" > "$site.tmp/.wheels" && rm -rf "$site" && mv "$site.tmp" "$site" ||
+    fail 'Cannot install Python libraries'
 }
 
 do_install() {
