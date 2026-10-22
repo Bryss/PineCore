@@ -54,6 +54,15 @@ SX1262_PINS = dict(
     dio3_tcxo_voltage=1.8,
 )
 PREAMBLE_LENGTH = 32
+# The CH341 has no interrupt line, so the driver polls the SX1262's IRQ pin over
+# USB. Upstream polls every 1 ms (~1000 USB transfers/s), which kept the Pager's
+# CPU at ~75% while idle. The SX1262 holds IRQ high until it is cleared, so a
+# slower poll only adds latency, which is negligible next to LoRa airtime.
+IRQ_POLL_SECONDS = 0.02
+# The driver's RX loop also wakes every radio_timing_delay (10 ms upstream) just
+# to maybe sample the noise floor; real packets wake it through an event. At
+# 30 ms the idle loop costs a third as much CPU and TX setup gains ~80 ms.
+RADIO_TIMING_DELAY = 0.03
 DEFAULT_TX_POWER = 20
 # The SX1262/E22-900 front end is only matched for the sub-GHz ISM bands.
 FREQ_MIN_HZ = 850_000_000
@@ -94,6 +103,14 @@ LIB_FALLBACKS = {
 }
 
 log = logging.getLogger("pinecore")
+
+
+def read_battery_mv():
+    try:
+        with open(BATTERY_VOLTAGE, "r") as f:
+            return max(0, min(int(f.read().strip()) // 1000, 0xFFFF))
+    except (OSError, ValueError):
+        return 0
 
 
 class Paths:
@@ -353,6 +370,7 @@ def check_frequency(freq_hz):
 
 def make_companion_class():
     from openhop_core.companion import CompanionRadio
+    from openhop_core.companion.constants import STATS_TYPE_CORE, STATS_TYPE_PACKETS, STATS_TYPE_RADIO
     from openhop_core.companion.frame_server import CompanionFrameServer
 
     class PagerCompanion(CompanionRadio):
@@ -362,6 +380,29 @@ def make_companion_class():
             self._paths = paths
             self.restart_requested = False
             super().__init__(*args, **kwargs)
+            self.tx_air_secs = 0.0
+            real_send = self._radio.send
+
+            async def send_and_count(data, *a, **kw):
+                meta = await real_send(data, *a, **kw)
+                if meta:
+                    self.tx_air_secs += float(meta.get("airtime_ms", 0)) / 1000.0
+                return meta
+
+            self._radio.send = send_and_count
+
+        def get_stats(self, stats_type=STATS_TYPE_PACKETS):
+            # Fill in what openhop_core leaves at zero, so the app's stats are real.
+            stats = dict(super().get_stats(stats_type))
+            if stats_type == STATS_TYPE_CORE:
+                stats["battery_mv"] = read_battery_mv()
+                stats["errors"] = self.stats.packets.tx_errors
+            elif stats_type == STATS_TYPE_RADIO:
+                stats["tx_air_secs"] = int(self.tx_air_secs)
+            else:
+                stats["sent"] = stats.get("flood_tx", 0) + stats.get("direct_tx", 0)
+                stats["recv"] = stats.get("flood_rx", 0) + stats.get("direct_rx", 0)
+            return stats
 
         def _load_prefs(self):
             prefs_from_json(self.prefs, read_json(self._paths.prefs, {}))
@@ -420,12 +461,8 @@ def make_companion_class():
             self._storage_dir = storage_dir
 
         def _get_batt_and_storage(self):
-            millivolts = used_kb = total_kb = 0
-            try:
-                with open(BATTERY_VOLTAGE, "r") as f:
-                    millivolts = int(f.read().strip()) // 1000
-            except (OSError, ValueError):
-                pass
+            millivolts = read_battery_mv()
+            used_kb = total_kb = 0
             if self._storage_dir:
                 try:
                     st = os.statvfs(self._storage_dir)
@@ -433,8 +470,7 @@ def make_companion_class():
                     used_kb = (st.f_blocks - st.f_bfree) * st.f_frsize // 1024
                 except OSError:
                     pass
-            return (max(0, min(millivolts, 0xFFFF)), min(used_kb, 0xFFFFFFFF),
-                    min(total_kb, 0xFFFFFFFF))
+            return (millivolts, min(used_kb, 0xFFFFFFFF), min(total_kb, 0xFFFFFFFF))
 
         async def _persist_contact(self, contact):
             self._on_change()
@@ -538,8 +574,30 @@ def import_radio_driver():
     return set_spi_transport, SX1262Radio, CH341SPITransport
 
 
+def slow_down_irq_polling():
+    """Make the CH341 IRQ poll loop sleep IRQ_POLL_SECONDS instead of 1 ms.
+
+    The interval is a local inside the upstream poll loop, so give that one
+    module a clock whose sleep() has a floor; its only sleeps are in that loop.
+    """
+    from openhop_core.hardware.ch341 import ch341_gpio_manager
+
+    real_time = time
+
+    class PollClock:
+        time = staticmethod(real_time.time)
+        monotonic = staticmethod(real_time.monotonic)
+
+        @staticmethod
+        def sleep(seconds):
+            real_time.sleep(max(seconds, IRQ_POLL_SECONDS))
+
+    ch341_gpio_manager.time = PollClock
+
+
 def build_radio(prefs_data):
     set_spi_transport, SX1262Radio, CH341SPITransport = import_radio_driver()
+    slow_down_irq_polling()
 
     check_frequency(prefs_data["frequency_hz"])
     spi = CH341SPITransport(vid=CH341_VID, pid=CH341_PID, auto_setup_gpio=True)
@@ -552,6 +610,7 @@ def build_radio(prefs_data):
         bandwidth=int(prefs_data["bandwidth_hz"]),
         coding_rate=int(prefs_data["coding_rate"]),
         preamble_length=PREAMBLE_LENGTH,
+        radio_timing_delay=RADIO_TIMING_DELAY,
         sync_word=0x12,  # MeshCore private sync word (the SX1262 reset default)
         spi_transport=spi,
         gpio_manager=spi.gpio_manager,

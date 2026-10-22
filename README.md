@@ -3,18 +3,21 @@
 > [!CAUTION]
 > **VIBE-CODED PROOF OF CONCEPT. NOT A WORKING, TESTED PRODUCT.**
 >
-> An AI assistant wrote this in one session. **It has never sent or received a single LoRa packet.**
+> An AI assistant wrote this in one session. **It has never received a single LoRa packet from
+> another node**, and nothing it transmitted has been confirmed received by anyone.
 >
 > What has actually been checked, on one Pager with the Glytch Mesh Mod attached:
 > - Python runtime installs (from files staged over USB; **the payload's own online download path has never run**)
 > - PineCore takes the CH341 from the Pager's kernel driver and talks SPI to the SX1262: register
 >   reads come back correct, the chip sits in RX mode, and the noise floor reads a live value (around -103 dBm)
-> - the MeshCore companion protocol answers on TCP 5000 (device info, settings, battery, stats),
->   tested with the `meshcore` Python client. The MeshCore phone app was **not** tested.
+> - the MeshCore phone app connects over TCP 5000 and shows the node (one user, one phone)
+> - 16 protocol/hardware checks via the `meshcore` Python client: two transmissions (a flood advert
+>   and a private-channel message at 10 dBm) completed with the chip's TX-done interrupt; the radio
+>   returns to RX; live retune; out-of-band frequencies refused; settings persist; procd respawns after kill -9
 > - two simulated nodes on a fake radio exchange adverts, DMs, ACKs and channel messages
 >
-> Not verified at all: transmitting, receiving real packets, interop with real MeshCore nodes, TX
-> power and RF switching on this module, the phone app. Expect it to break in ways nobody has found
+> Not verified at all: receiving real packets, interop with real MeshCore nodes (none in range during
+> testing), actual RF output power and antenna path, which E22 variant the Mod uses. Expect it to break in ways nobody has found
 > yet. Don't rely on it for anything, don't trust it for emergency comms, and check your radio
 > settings are legal where you are before you transmit. Use at your own risk; no support, no warranty.
 
@@ -93,6 +96,12 @@ applied to the radio live and persisted. Frequencies outside 850–930 MHz are r
 
 - **Noise floor:** the first hardware test read about -103 dBm with the Pager on USB next to a laptop.
   That's high and likely local interference, so expect reduced range until that's understood.
+- **CPU / battery:** the CH341 has no interrupt line, so the SX1262's IRQ pin is polled over USB
+  from Python. Even after tuning (20 ms IRQ poll, 30 ms radio loop; upstream uses 1 ms / 10 ms),
+  PineCore uses **~45% CPU while idle**. During testing the Pager drew ~0.9 A and drained quickly,
+  even while plugged into a laptop. Not suitable for all-day use as-is.
+- **Battery %:** the app works out its own percentage from the voltage PineCore reports, so it
+  reads lower than the Pager's fuel gauge (e.g. 22% vs 30%). The Pager's figure is the accurate one.
 - **TX power:** the default is 20 dBm. If your Mesh Mod uses a high-power E22-…M30S module, the
   external PA adds about 8 dB, so lower the setting to stay within your region's limit
   (EU 869.4–869.65 MHz: 500 mW ERP).
