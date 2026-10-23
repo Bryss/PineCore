@@ -23,6 +23,11 @@
 
 **MeshCore for the WiFi Pineapple Pager + Glytch Mesh Mod (proof of concept).**
 
+> [!TIP]
+> **Prefer [PineCore Native](https://github.com/Bryss/PineCore-Native)**: the real MeshCore C++
+> companion firmware built for the Pager. About 5% CPU instead of about 45%, 1 MB RAM, 0.5 MB install, no
+> internet needed. This Python version is kept for reference.
+
 Glytch's [Mesh Mod](https://github.com/glytchtech/Pager-Mod-Docs/tree/main/Mesh) ships with a
 Meshtastic payload. PineCore is its MeshCore twin: same hardware, same payload menu, but the Pager
 joins your local **MeshCore** mesh instead, and the **MeshCore app** connects to it over Wi-Fi/USB
