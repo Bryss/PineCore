@@ -1,7 +1,7 @@
 #!/bin/bash
 
 # Title: MeshCore
-# Description: UNTESTED vibe-coded PoC - MeshCore companion for the Glytch Mesh Mod. Start/Stop, radio region, contact QR; Enable at Boot defaults OFF
+# Description: DEPRECATED (use MeshCore Native) - UNTESTED vibe-coded PoC - MeshCore companion for the Glytch Mesh Mod. Start/Stop, radio region, contact QR; Enable at Boot defaults OFF
 # Author: Bryss
 # Version: 1
 
