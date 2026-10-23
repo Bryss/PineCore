@@ -24,7 +24,7 @@
 > - a 15-check two-node simulation (adverts, DMs + ACKs, channels, offline queue across restarts)
 >
 > Not verified: receiving real packets, interop with real nodes, actual RF output and antenna path,
-> which E22 variant the Mod uses, long-term stability. Check your radio settings are legal where you
+> long-term stability. The radio module was identified physically as an **E22-900M22S** (22 dBm max). Check your radio settings are legal where you
 > are before transmitting. Use at your own risk; no support, no warranty.
 
 ## Why this exists
@@ -113,8 +113,9 @@ Command line: `payload.sh --install | --start | --stop | --region "EU/UK (Narrow
 - **Battery %:** the app derives its own percentage from the voltage, which differs from the Pager's
   fuel gauge at mid charge (e.g. 22% vs 30%). Trust the Pager's figure.
 - **Noise floor** read about -103 dBm with the Pager on USB next to a laptop. That's high and likely local interference.
-- **TX power:** default 20 dBm. A high-power E22-…M30S adds about 8 dB of PA gain, so lower it to stay legal
-  (EU 869.4–869.65 MHz: 500 mW ERP).
+- **TX power:** default 20 dBm, up to 22. The Glytch Mesh Mod's module is an **E22-900M22S** (no
+  external PA, so the setting is the output; 22 dBm = 158 mW is within EU 500 mW ERP). If you've fitted
+  a high-power E22-…M30S (about +8 dB PA), keep it at 18 or lower.
 - Only one of Meshtastic, PineCore and PineCore Native can own the Mesh Mod at a time; Start checks.
 
 Logs: `logread | grep python3`. Debug: stop the server, then
