@@ -130,7 +130,7 @@ Logs: `logread | grep python3`. Debug: stop the server, then
 ## Contributing
 
 This was built in one sitting to get MeshCore onto the Pager. It's here so the community can pick it
-up. **Fork it, break it, improve it**, and open issues and PRs. That said, the
+up. **Fork it, break it, improve it**. That said, the
 [native version](https://github.com/Bryss/PineCore-Native) is the better base for almost anything.
 Good reasons to work on *this* one: you want a quick Python playground for MeshCore on the Pager, or
 you want to improve [openhop_core](https://github.com/pyMC-dev/pyMC_core)'s CH341 path (say, fewer
